@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, Users, User, Trophy, Loader2, ChevronDown, ChevronUp,
-  Shield, Calendar, Send, CheckCircle, Megaphone
+  Shield, Calendar, Send, CheckCircle, Megaphone, Code2
 } from 'lucide-react';
 import InterviewScheduler from './InterviewScheduler';
+import CreateJobTestModal from './CreateJobTestModal';
 
 const API_BASE = 'http://localhost:8006';
 
@@ -22,10 +23,10 @@ const STATUS_LABELS = {
 };
 
 const NEXT_ACTIONS = {
-  applied:             [{ status: 'shortlisted', label: 'Shortlist', color: 'bg-cyan-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
-  resume_reviewed:     [{ status: 'shortlisted', label: 'Shortlist', color: 'bg-cyan-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
-  shortlisted:         [{ status: 'test_invited', label: 'Invite to Test', color: 'bg-yellow-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
-  test_completed:      [{ status: 'interview_scheduled', label: 'Move to Interview', color: 'bg-purple-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
+  applied: [{ status: 'shortlisted', label: 'Shortlist', color: 'bg-cyan-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
+  resume_reviewed: [{ status: 'shortlisted', label: 'Shortlist', color: 'bg-cyan-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
+  shortlisted: [{ status: 'test_invited', label: 'Invite to Test', color: 'bg-yellow-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
+  test_completed: [{ status: 'interview_scheduled', label: 'Move to Interview', color: 'bg-purple-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
   interview_completed: [{ status: 'hired', label: '🎉 Hire', color: 'bg-green-500' }, { status: 'rejected', label: 'Reject', color: 'bg-red-500' }],
 };
 
@@ -51,7 +52,7 @@ const CandidateRow = ({ app, token, onStatusChange }) => {
         body: JSON.stringify({ status }),
       });
       if (res.ok) onStatusChange(app.id, status);
-    } catch {}
+    } catch { }
     setUpdating(false);
   };
 
@@ -136,7 +137,7 @@ const RankingTab = ({ jobId, token, candidates, onStatusChange }) => {
   useEffect(() => {
     fetch(`${API_BASE}/company/ranking/${jobId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(data => { if (Array.isArray(data)) setRanking(data); })
-      .catch(() => {}).finally(() => setLoading(false));
+      .catch(() => { }).finally(() => setLoading(false));
   }, [jobId]);
 
   const hire = async (appId) => {
@@ -217,9 +218,8 @@ const RankingTab = ({ jobId, token, candidates, onStatusChange }) => {
 
       {ranking.map((app, i) => (
         <div key={app.application_id} className="flex items-center gap-4 p-5 bg-white/60 dark:bg-dark-background/50 border border-gray-200/80 dark:border-gray-700/60 rounded-2xl">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-lg flex-shrink-0 ${
-            i === 0 ? 'bg-yellow-400 text-white' : i === 1 ? 'bg-gray-300 dark:bg-gray-500 text-white' : i === 2 ? 'bg-amber-600 text-white' : 'bg-secondary/20 dark:bg-dark-secondary/20 text-text/60 dark:text-dark-text/60'
-          }`}>{i + 1}</div>
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-lg flex-shrink-0 ${i === 0 ? 'bg-yellow-400 text-white' : i === 1 ? 'bg-gray-300 dark:bg-gray-500 text-white' : i === 2 ? 'bg-amber-600 text-white' : 'bg-secondary/20 dark:bg-dark-secondary/20 text-text/60 dark:text-dark-text/60'
+            }`}>{i + 1}</div>
           <div className="flex-1 min-w-0">
             <p className="font-bold text-text dark:text-dark-text">{app.name}</p>
             <p className="text-sm text-gray-400">{app.email}</p>
@@ -247,6 +247,7 @@ const RankingTab = ({ jobId, token, candidates, onStatusChange }) => {
 
 const CompanyJobView = ({ job, token, onBack }) => {
   const [candidates, setCandidates] = useState([]);
+  const [showCreateTest, setShowCreateTest] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('candidates');
@@ -255,7 +256,7 @@ const CompanyJobView = ({ job, token, onBack }) => {
   useEffect(() => {
     fetch(`${API_BASE}/company/applicants/${job.id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(data => { if (Array.isArray(data)) setCandidates(data); })
-      .catch(() => {}).finally(() => setLoading(false));
+      .catch(() => { }).finally(() => setLoading(false));
   }, [job.id]);
 
   const handleStatusChange = (appId, newStatus) => {
@@ -304,10 +305,18 @@ const CompanyJobView = ({ job, token, onBack }) => {
               <p className="text-sm text-gray-400">{job.location} · {job.job_type}</p>
             </div>
           </div>
-          <button onClick={() => setShowScheduler(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-bold hover:opacity-90 transition-opacity">
-            <Calendar className="w-4 h-4" /> Manage Interview Slots
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowCreateTest(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:opacity-90 transition-opacity"
+            >
+              <Code2 className="w-4 h-4" /> Create / Configure Test
+            </button>
+            <button onClick={() => setShowScheduler(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-bold hover:opacity-90 transition-opacity">
+              <Calendar className="w-4 h-4" /> Manage Interview Slots
+            </button>
+          </div>
         </div>
       </div>
 
@@ -352,8 +361,8 @@ const CompanyJobView = ({ job, token, onBack }) => {
                   </button>
                 ))}
               </div>
-              <button 
-                onClick={handleBulkScreen} 
+              <button
+                onClick={handleBulkScreen}
                 disabled={bulkScreening}
                 className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors disabled:opacity-60"
               >
@@ -379,7 +388,16 @@ const CompanyJobView = ({ job, token, onBack }) => {
       </div>
 
       <AnimatePresence>
-        {showScheduler && <InterviewScheduler job={job} token={token} onClose={() => setShowScheduler(false)} />}
+        {showCreateTest && (
+          <CreateJobTestModal
+            token={token}
+            jobId={job.id}
+            onClose={() => setShowCreateTest(false)}
+          />
+        )}
+        {showScheduler && (
+          <InterviewScheduler job={job} token={token} onClose={() => setShowScheduler(false)} />
+        )}
       </AnimatePresence>
     </div>
   );

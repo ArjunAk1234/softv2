@@ -1,26 +1,28 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import {
   ChevronLeft, CheckCircle, Clock, AlertCircle, Trophy, FileText,
-  Code2, Calendar, Upload, Loader2, Star, Shield, User, Briefcase
+  Code2, Calendar, Upload, Loader2, Star, Shield, Briefcase
 } from 'lucide-react';
 import MCQAssessment from './MCQAssessment';
+import CodingAssessment from './CodingAssessment';
 import SlotPicker from './SlotPicker';
 
 const API_BASE = 'http://localhost:8006';
 
+
 // ── status → human label ──────────────────────────────────────────────────────
 const STATUS_MAP = {
-  applied:              { label: 'Application Submitted', icon: FileText, color: 'blue', desc: 'Your application is under review.' },
-  resume_reviewed:      { label: 'Resume Reviewed', icon: CheckCircle, color: 'indigo', desc: 'The company reviewed your resume.' },
-  shortlisted:          { label: 'Shortlisted! 🎉', icon: Star, color: 'cyan', desc: 'You have been shortlisted. Prepare for the test.' },
-  rejected:             { label: 'Not Selected', icon: AlertCircle, color: 'red', desc: 'Thank you for applying. Keep trying!' },
-  test_invited:         { label: 'Test Ready', icon: Code2, color: 'yellow', desc: 'You can now take the technical assessment.' },
-  test_in_progress:     { label: 'Test In Progress', icon: Code2, color: 'orange', desc: 'You have an active test session.' },
-  test_completed:       { label: 'Test Completed ✓', icon: CheckCircle, color: 'teal', desc: 'Test done! Schedule your interview.' },
-  interview_scheduled:  { label: 'Interview Scheduled', icon: Calendar, color: 'purple', desc: 'Your interview is confirmed.' },
-  interview_completed:  { label: 'Interview Done', icon: CheckCircle, color: 'violet', desc: 'Awaiting final decision.' },
-  hired:                { label: '🎉 Hired!', icon: Trophy, color: 'green', desc: 'Congratulations! You got the job!' },
+  applied: { label: 'Application Submitted', icon: FileText, color: 'blue', desc: 'Your application is under review.' },
+  resume_reviewed: { label: 'Resume Reviewed', icon: CheckCircle, color: 'indigo', desc: 'The company reviewed your resume.' },
+  shortlisted: { label: 'Shortlisted! 🎉', icon: Star, color: 'cyan', desc: 'You have been shortlisted. Prepare for the test.' },
+  rejected: { label: 'Not Selected', icon: AlertCircle, color: 'red', desc: 'Thank you for applying. Keep trying!' },
+  test_invited: { label: 'Test Ready', icon: Code2, color: 'yellow', desc: 'You can now take the technical assessment.' },
+  test_in_progress: { label: 'Test In Progress', icon: Code2, color: 'orange', desc: 'You have an active test session.' },
+  test_completed: { label: 'Test Completed ✓', icon: CheckCircle, color: 'teal', desc: 'Test done! Schedule your interview.' },
+  interview_scheduled: { label: 'Interview Scheduled', icon: Calendar, color: 'purple', desc: 'Your interview is confirmed.' },
+  interview_completed: { label: 'Interview Done', icon: CheckCircle, color: 'violet', desc: 'Awaiting final decision.' },
+  hired: { label: '🎉 Hired!', icon: Trophy, color: 'green', desc: 'Congratulations! You got the job!' },
 };
 
 const colorMap = {
@@ -36,7 +38,8 @@ const colorMap = {
   green: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
 };
 
-const ScoreBar = ({ label, score, color }) => (
+const ScoreBar = ({ label, score }) => (
+
   <div className="mb-4">
     <div className="flex justify-between text-sm mb-2">
       <span className="text-gray-500 dark:text-gray-400 font-medium">{label}</span>
@@ -55,20 +58,24 @@ const ScoreBar = ({ label, score, color }) => (
 const PIPELINE = ['applied', 'shortlisted', 'test_invited', 'test_completed', 'interview_scheduled', 'interview_completed', 'hired'];
 const pipelineIndex = (status) => {
   if (status === 'rejected') return -1;
+  // Map intermediate statuses to their nearest pipeline stage
+  if (status === 'resume_reviewed') return 0; // still in "applied" stage
+  if (status === 'test_in_progress') return 2; // same position as test_invited
   return PIPELINE.indexOf(status);
 };
 
 const ApplicationDetails = ({ application, onBack }) => {
   const [app, setApp] = useState(application);
-  const [test, setTest] = useState(null); // test questions loaded from backend
-  const [showTest, setShowTest] = useState(false);
+  const [test, setTest] = useState(null); // full test session from backend
+  const [phase, setPhase] = useState(null); // null | 'mcq' | 'coding'
+  const [mcqAnswers, setMcqAnswers] = useState({});
   const [showSlotPicker, setShowSlotPicker] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [loadingTest, setLoadingTest] = useState(false);
 
-  const auth = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token');
+
   const status = app.rawStatus || app.status;
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.applied;
   const colorCls = colorMap[statusInfo.color] || colorMap.blue;
@@ -85,7 +92,8 @@ const ApplicationDetails = ({ application, onBack }) => {
         const fresh = all.find(a => a.id === app.id);
         if (fresh) setApp({ ...app, ...fresh, rawStatus: fresh.status });
       }
-    } catch {}
+    } catch (e) { console.warn('refresh failed', e); }
+
   };
 
   // Upload resume
@@ -113,31 +121,78 @@ const ApplicationDetails = ({ application, onBack }) => {
     setLoadingTest(true);
     try {
       const res = await fetch(`${API_BASE}/test/${app.id}/start`, {
-        method: 'POST',
+        method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (res.ok) { setTest(data); setShowTest(true); }
-      else alert(data.error || 'Failed to load test');
+      if (res.ok) {
+        setTest(data);
+        // Decide which phase to start: MCQ first if present, else coding directly
+        const hasMcq = Array.isArray(data.questions?.mcq?.questions) && data.questions.mcq.questions.length > 0;
+        setPhase(hasMcq ? 'mcq' : 'coding');
+      } else {
+        alert(data.error || 'Failed to load test');
+      }
     } catch { alert('Network error'); }
     setLoadingTest(false);
   };
 
-  const handleTestComplete = async (answers) => {
+  // Called when MCQ round completes; move to coding
+  const handleMcqComplete = (answers) => {
+    setMcqAnswers(answers);
+    const hasCoding = Array.isArray(test?.questions?.coding?.questions) && test.questions.coding.questions.length > 0;
+    setPhase(hasCoding ? 'coding' : null);
+    if (!hasCoding) handleFinalSubmit(answers, {});
+  };
+
+  // Called when candidate submits all coding answers
+  const handleFinalSubmit = async (mAnswers, codingAnswers) => {
+    const payload = {
+      sessionId: test?.id,
+      mcqAnswers: mAnswers || mcqAnswers,
+      codingAnswers: codingAnswers || {},
+    };
     try {
-      await fetch(`${API_BASE}/test/${app.id}/submit`, {
+      const res = await fetch(`${API_BASE}/test/${app.id}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(answers),
+        body: JSON.stringify(payload),
       });
-      setShowTest(false);
+      const data = await res.json();
+      setPhase(null);
       await refresh();
+      return data;
     } catch { alert('Submit failed'); }
   };
 
-  if (showTest && test) {
-    return <MCQAssessment test={test} applicationId={app.id} onComplete={handleTestComplete} onExit={() => setShowTest(false)} />;
+  // MCQ Phase
+  if (phase === 'mcq' && test) {
+    return (
+      <MCQAssessment
+        test={test}
+        application={app}
+        token={token}
+        onBack={() => setPhase(null)}
+        onComplete={handleMcqComplete}
+      />
+    );
   }
+
+  // Coding Phase
+  if (phase === 'coding' && test) {
+    return (
+      <CodingAssessment
+        test={test}
+        mcqAnswers={mcqAnswers}
+        sessionId={test?.id}
+        application={app}
+        token={token}
+        onBack={() => setPhase(null)}
+        onSubmitAll={(payload) => handleFinalSubmit(payload.mcqAnswers, payload.codingAnswers)}
+      />
+    );
+  }
+
 
   if (showSlotPicker) {
     return (
@@ -282,7 +337,7 @@ const ApplicationDetails = ({ application, onBack }) => {
             <button onClick={loadTest} disabled={loadingTest}
               className="px-8 py-3 bg-yellow-500 text-white font-bold rounded-xl hover:opacity-90 transition-all disabled:opacity-60 flex items-center gap-2 mx-auto">
               {loadingTest ? <Loader2 className="w-5 h-5 animate-spin" /> : <Code2 className="w-5 h-5" />}
-              {loadingTest ? 'Loading Test…' : status === 'test_in_progress' ? 'Continue Test' : 'Start Technical Test'}
+              {loadingTest ? 'Loading Test…' : status === 'test_in_progress' ? 'Continue Test' : 'Start Assessment'}
             </button>
           </motion.div>
         )}

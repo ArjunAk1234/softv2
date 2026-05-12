@@ -180,15 +180,73 @@ router.get("/applications/:appId/details", async (req, res, next) => {
 router.post("/jobs/:jobId/test", async (req, res, next) => {
     try {
         const { jobId } = req.params;
-        const { questions, duration_minutes } = req.body;
+        const { questions, duration_minutes, deadline_at } = req.body;
+
+        if (!questions) return res.status(400).json({ error: "questions is required" });
+
+        const duration = duration_minutes ?? 60;
+        const deadline = deadline_at ? new Date(deadline_at) : null;
+
+        const normalizedQuestions = normalizeQuestionsPayload(questions);
+
         const { rows } = await pool.query(
-            `INSERT INTO job_tests (job_id, questions, duration_minutes) VALUES ($1, $2, $3)
-       ON CONFLICT (job_id) DO UPDATE SET questions=$2, duration_minutes=$3 RETURNING *`,
-            [jobId, JSON.stringify(questions), duration_minutes || 60]
+            `INSERT INTO job_tests (job_id, questions, duration_minutes, deadline_at, updated_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (job_id)
+             DO UPDATE SET questions=$2, duration_minutes=$3, deadline_at=$4, updated_at=NOW()
+             RETURNING *`,
+            [jobId, JSON.stringify(normalizedQuestions), duration, deadline]
         );
+
         res.status(201).json({ message: "Test created for job", test: rows[0] });
     } catch (err) { next(err); }
 });
+
+function normalizeQuestionsPayload(questions) {
+    // Backward compatibility with old repo format:
+    // { mcqs: [{id, question, options, correct (string/number), points}], coding: [{id,title,description,points}] }
+    if (questions?.mcqs || questions?.coding) {
+        return {
+            mcq: {
+                passThreshold: questions.passThreshold ?? 50,
+                questions: (questions.mcqs || []).map((q) => ({
+                    id: q.id,
+                    question: q.question,
+                    options: q.options || [],
+                    correct_index:
+                        typeof q.correct === "number"
+                            ? q.correct
+                            : (q.options || []).findIndex(
+                                (o) => String(o).toLowerCase() === String(q.correct).toLowerCase()
+                            ),
+                    points: q.points ?? 10,
+                })),
+            },
+            coding: {
+                passThreshold: questions.passThreshold ?? 50,
+                questions: (Array.isArray(questions.coding)
+                    ? questions.coding
+                    : Array.isArray(questions.coding?.questions)
+                        ? questions.coding.questions
+                        : []
+                ).map((q) => ({
+                    id: q.id,
+                    title: q.title,
+                    description: q.description,
+                    language_options: q.language_options || ["python"],
+                    boilerplate: q.boilerplate || "",
+                    testCases: q.testCases || [],
+                    points_per_testcase: q.points_per_testcase,
+                    points: q.points,
+                })),
+            },
+            duration_minutes: questions.duration_minutes,
+        };
+    }
+
+    // New format already in { mcq: {...}, coding: {...} }
+    return questions;
+}
 
 // POST /api/company/jobs/:jobId/generate-test-ai
 router.post("/jobs/:jobId/generate-test-ai", async (req, res, next) => {
@@ -229,7 +287,7 @@ router.post("/jobs/:jobId/bulk-screen", async (req, res, next) => {
             const candSkills = app.cand_skills || [];
             let matched = 0;
             const candCombined = candSkills.join(" ").toLowerCase();
-            
+
             for (const js of jobSkills) {
                 const skillLower = js.toLowerCase();
                 const baseSkill = skillLower.replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/)[0];
@@ -239,7 +297,7 @@ router.post("/jobs/:jobId/bulk-screen", async (req, res, next) => {
             }
             const matchRatio = jobSkills.length > 0 ? (matched / jobSkills.length) : 1;
             const score = Math.min(100, Math.round(matchRatio * 80) + (app.experience_years || 0) * 4);
-            
+
             const newStatus = score >= 40 ? "shortlisted" : "rejected";
             const feedback = { score, summary: `Local analysis scored ${score}% based on skills match (${matched}/${jobSkills.length}) and experience.`, recommendation: score >= 40 ? "shortlist" : "reject" };
 

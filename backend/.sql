@@ -3,5 +3,7 @@ CREATE TABLE IF NOT EXISTS job_tests (
     job_id UUID REFERENCES jobs(id) ON DELETE CASCADE UNIQUE,
     questions JSONB NOT NULL,
     duration_minutes INTEGER DEFAULT 60,
-    created_at TIMESTAMP DEFAULT NOW()
+    deadline_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
