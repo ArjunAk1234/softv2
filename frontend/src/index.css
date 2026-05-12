@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Apply base styles for the entire app */
+  
+  /* Light theme scrollbar */
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.primary') theme('colors.background');
+  }
+
+  /* Dark theme scrollbar */
+  html.dark {
+    scrollbar-color: theme('colors.dark-primary') theme('colors.dark-background');
+  }
+  
+  /* Define CSS custom properties for theme-aware colors */
+  :root {
+    --text-color: theme('colors.text');
+    --bg-color: theme('colors.background');
+    --primary-color: theme('colors.primary');
+    --secondary-color: theme('colors.secondary');
+    --accent-color: theme('colors.accent');
+    --cyanblue-color: theme('colors.cyanblue');
+  }
+  
+  .dark {
+    --text-color: theme('colors.dark-text');
+    --bg-color: theme('colors.dark-background');
+    --primary-color: theme('colors.dark-primary');
+    --secondary-color: theme('colors.dark-secondary');
+    --accent-color: theme('colors.dark-accent');
+    --cyanblue-color: theme('colors.dark-cyanblue');
+  }
+}
+
+/* Pattern element utility */
+.pattern-element {
+  --pattern-color: theme('colors.primary');
+}
+
+.dark .pattern-element {
+  --pattern-color: theme('colors.dark-primary');
+}
