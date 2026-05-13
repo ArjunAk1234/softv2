@@ -30,7 +30,7 @@ function AppRoutes() {
       <Route
         path="/interviewer"
         element={
-          auth && role === 'interviewer' ? <InterviewerDashboard />
+          auth && role === 'interviewer' ? <InterviewerDashboard user={auth.user} token={auth.token} />
           : auth ? <Navigate to="/dashboard" />
           : <Navigate to="/login" />
         }

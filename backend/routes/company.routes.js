@@ -176,7 +176,19 @@ router.get("/applications/:appId/details", async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
-// POST /api/company/jobs/:jobId/test
+// GET /api/company/jobs/:jobId/test  — fetch existing test for editing
+router.get("/jobs/:jobId/test", async (req, res, next) => {
+    try {
+        const { rows } = await pool.query(
+            "SELECT * FROM job_tests WHERE job_id=$1",
+            [req.params.jobId]
+        );
+        if (!rows.length) return res.status(404).json({ error: "No test found" });
+        res.json(rows[0]);
+    } catch (err) { next(err); }
+});
+
+// POST /api/company/jobs/:jobId/test  (also handles PUT via same logic)
 router.post("/jobs/:jobId/test", async (req, res, next) => {
     try {
         const { jobId } = req.params;
@@ -188,6 +200,9 @@ router.post("/jobs/:jobId/test", async (req, res, next) => {
         const deadline = deadline_at ? new Date(deadline_at) : null;
 
         const normalizedQuestions = normalizeQuestionsPayload(questions);
+        
+        // Debug: log MCQ count so we can verify what arrives
+        console.log('[TEST SAVE] jobId:', jobId, 'MCQ count:', normalizedQuestions?.mcq?.questions?.length, 'Coding count:', normalizedQuestions?.coding?.questions?.length);
 
         const { rows } = await pool.query(
             `INSERT INTO job_tests (job_id, questions, duration_minutes, deadline_at, updated_at)
@@ -202,10 +217,21 @@ router.post("/jobs/:jobId/test", async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
+// PUT /api/company/jobs/:jobId/test  — alias for editing
+router.put("/jobs/:jobId/test", async (req, res, next) => {
+    req.method = 'POST';
+    return router.handle(req, res, next);
+});
+
+
 function normalizeQuestionsPayload(questions) {
-    // Backward compatibility with old repo format:
-    // { mcqs: [{id, question, options, correct (string/number), points}], coding: [{id,title,description,points}] }
-    if (questions?.mcqs || questions?.coding) {
+    // OLD format: { mcqs: [...], coding: [...] }  — mcqs is the old key, coding is an array
+    // NEW format: { mcq: { questions: [...] }, coding: { questions: [...] } }
+    // BUG FIX: old check `questions?.coding` was always true for new format too (coding is an object)
+    // Only enter old-format path if `mcqs` key exists (old) OR coding is a plain array (old)
+    const isOldFormat = Array.isArray(questions?.mcqs) || Array.isArray(questions?.coding);
+
+    if (isOldFormat) {
         return {
             mcq: {
                 passThreshold: questions.passThreshold ?? 50,
@@ -224,12 +250,7 @@ function normalizeQuestionsPayload(questions) {
             },
             coding: {
                 passThreshold: questions.passThreshold ?? 50,
-                questions: (Array.isArray(questions.coding)
-                    ? questions.coding
-                    : Array.isArray(questions.coding?.questions)
-                        ? questions.coding.questions
-                        : []
-                ).map((q) => ({
+                questions: (Array.isArray(questions.coding) ? questions.coding : []).map((q) => ({
                     id: q.id,
                     title: q.title,
                     description: q.description,
@@ -244,9 +265,10 @@ function normalizeQuestionsPayload(questions) {
         };
     }
 
-    // New format already in { mcq: {...}, coding: {...} }
+    // New format already in { mcq: { questions: [...] }, coding: { questions: [...] } } — return as-is
     return questions;
 }
+
 
 // POST /api/company/jobs/:jobId/generate-test-ai
 router.post("/jobs/:jobId/generate-test-ai", async (req, res, next) => {

@@ -216,17 +216,22 @@ router.get("/:appId/start", authorize("candidate"), async (req, res, next) => {
 
         if (existingSess.rows.length > 0) {
             const sess = existingSess.rows[0];
+            // Session is valid if it has either MCQ questions OR coding questions
             const existingMcqQs = sess.questions?.mcq?.questions;
-            const sessionIsValid = Array.isArray(existingMcqQs) && existingMcqQs.length > 0;
+            const existingCodingQs = sess.questions?.coding?.questions;
+            const hasMcq = Array.isArray(existingMcqQs) && existingMcqQs.length > 0;
+            const hasCoding = Array.isArray(existingCodingQs) && existingCodingQs.length > 0;
+            const sessionIsValid = hasMcq || hasCoding;
 
-            if (sessionIsValid) {
+            if (sessionIsValid && sess.status !== 'completed') {
                 // Good session — return it as-is
                 return res.json({ ...sess, job_test_deadline_at: jobDeadlineAt });
             }
 
-            // Stale/empty session — delete it and fall through to create a fresh one
+            // Stale/empty/completed session — delete it and fall through to create a fresh one
             await pool.query("DELETE FROM test_sessions WHERE id=$1", [sess.id]);
         }
+
 
         // ── Create new session ────────────────────────────────────────────────────
         const sessionRes = await pool.query(

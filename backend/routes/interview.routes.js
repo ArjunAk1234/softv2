@@ -158,13 +158,14 @@ router.get("/slots/:jobId", authorize("candidate"), async (req, res, next) => {
              FROM interview_slots s
              JOIN interviewers i ON i.id=s.interviewer_id
              JOIN users u ON u.id=i.user_id
-             WHERE s.job_id=$1 AND s.is_booked=false AND s.scheduled_at > NOW()
+             WHERE s.job_id=$1 AND s.is_booked=false
              ORDER BY s.scheduled_at ASC`,
             [req.params.jobId]
         );
         res.json(rows);
     } catch (err) { next(err); }
 });
+
 
 // ── CANDIDATE: Book a slot ────────────────────────────────────────────────────
 // POST /interview/book/:slotId
@@ -253,6 +254,37 @@ router.get("/interviewer/sessions", authorize("interviewer"), async (req, res, n
         res.json(rows);
     } catch (err) { next(err); }
 });
+
+// ── INTERVIEWER: Get all my slots (booked + available) ───────────────────────
+// GET /interview/interviewer/slots
+router.get("/interviewer/slots", authorize("interviewer"), async (req, res, next) => {
+    try {
+        const intRes = await pool.query("SELECT id FROM interviewers WHERE user_id=$1", [req.user.id]);
+        const interviewerId = intRes.rows[0]?.id;
+        if (!interviewerId) return res.status(404).json({ error: "Interviewer profile not found" });
+
+        const { rows } = await pool.query(
+            `SELECT s.*,
+               j.title as job_title, c.company_name,
+               iss.id as session_id, iss.status as session_status,
+               iss.interviewer_score, iss.interviewer_feedback,
+               cu.name as candidate_name, cu.email as candidate_email,
+               app.resume_score, app.test_score, app.interview_score, app.final_score,
+               app.id as application_id
+             FROM interview_slots s
+             JOIN jobs j ON j.id=s.job_id
+             JOIN companies c ON c.id=j.company_id
+             LEFT JOIN interview_sessions iss ON iss.slot_id=s.id
+             LEFT JOIN applications app ON app.id=iss.application_id
+             LEFT JOIN users cu ON cu.id=app.candidate_id
+             WHERE s.interviewer_id=$1
+             ORDER BY s.scheduled_at ASC`,
+            [interviewerId]
+        );
+        res.json(rows);
+    } catch (err) { next(err); }
+});
+
 
 // ── INTERVIEWER: Get AI notes for a session ───────────────────────────────────
 // GET /interview/sessions/:sessionId/ai-notes

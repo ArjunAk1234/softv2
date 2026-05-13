@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
+import InterviewerDashboard from './InterviewerDashboard';
 
 const API_BASE = 'http://localhost:8006';
 
@@ -337,6 +338,7 @@ const Dashboard = () => {
   const role = auth?.user?.role;
 
   if (role === 'company') return <CompanyDashboard auth={auth} />;
+  if (role === 'interviewer') return <InterviewerDashboard user={auth.user} token={auth.token} onBack={() => {}} />;
   return <CandidateDashboard auth={auth} />;
 };
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Calendar, Clock, User, Users, Plus, Loader2, CheckCircle,
-  Trash2, UserCheck, ChevronDown, ChevronUp
+  Trash2, UserCheck, ChevronDown, ChevronUp, UserPlus
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8006';
@@ -12,9 +12,10 @@ const InterviewScheduler = ({ job, token, onClose }) => {
   const [interviewers, setInterviewers] = useState([]);
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('slots'); // 'slots' | 'create' | 'bulk'
+  const [tab, setTab] = useState('slots'); // 'slots' | 'create' | 'bulk' | 'interviewers'
   const [form, setForm] = useState({ interviewerId: '', scheduledAt: '', duration: 45 });
   const [bulk, setBulk] = useState({ interviewerId: '', startDate: '', endDate: '', slotsPerDay: 3, startHour: 10, duration: 45 });
+  const [newIv, setNewIv] = useState({ name: '', email: '', password: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -49,6 +50,26 @@ const InterviewScheduler = ({ job, token, onClose }) => {
       const data = await res.json();
       if (res.ok) { setSuccess('Slot created!'); setForm({ interviewerId: '', scheduledAt: '', duration: 45 }); fetchData(); setTab('slots'); }
       else setError(data.error || 'Failed');
+    } catch { setError('Network error'); }
+    setSaving(false);
+  };
+
+  const createInterviewer = async e => {
+    e.preventDefault(); setError(''); setSuccess('');
+    if (!newIv.name || !newIv.email || !newIv.password) { setError('All fields required'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/interview/company/interviewers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(newIv),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess(`Interviewer ${newIv.name} created! They can log in with: ${newIv.email}`);
+        setNewIv({ name: '', email: '', password: '' });
+        fetchData();
+      } else setError(data.error || 'Failed to create');
     } catch { setError('Network error'); }
     setSaving(false);
   };
@@ -101,7 +122,7 @@ const InterviewScheduler = ({ job, token, onClose }) => {
 
         {/* Tabs */}
         <div className="flex border-b border-secondary/10 dark:border-dark-secondary/10 px-6">
-          {[['slots', 'View Slots'], ['create', '+ Single Slot'], ['bulk', '+ Bulk Slots']].map(([id, label]) => (
+          {[['slots', 'Slots'], ['create', '+ Single'], ['bulk', '+ Bulk'], ['interviewers', 'Interviewers']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
               className={`px-4 py-3 text-sm font-semibold border-b-2 transition-all -mb-px ${tab === id ? 'border-primary dark:border-dark-primary text-primary dark:text-dark-primary' : 'border-transparent text-text/40 dark:text-dark-text/40 hover:text-text dark:hover:text-dark-text'}`}>
               {label}
@@ -176,6 +197,48 @@ const InterviewScheduler = ({ job, token, onClose }) => {
                 {saving ? 'Creating…' : 'Create Slot'}
               </button>
             </form>
+          )}
+
+          {/* INTERVIEWERS LIST + ADD */}
+          {tab === 'interviewers' && (
+            <div className="space-y-5">
+              {/* Existing interviewers */}
+              <div>
+                <p className="text-xs font-bold text-text/60 dark:text-dark-text/60 uppercase tracking-wider mb-2">Current Interviewers</p>
+                {interviewers.length === 0 ? (
+                  <p className="text-sm text-gray-400">No interviewers added yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {interviewers.map(iv => (
+                      <div key={iv.id} className="flex items-center gap-3 p-3 bg-white/50 dark:bg-dark-background/40 border border-secondary/10 dark:border-dark-secondary/10 rounded-xl">
+                        <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                          <User className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-text dark:text-dark-text text-sm">{iv.name}</p>
+                          <p className="text-xs text-gray-400">{iv.email}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* Add new interviewer */}
+              <div>
+                <p className="text-xs font-bold text-text/60 dark:text-dark-text/60 uppercase tracking-wider mb-3">Add New Interviewer</p>
+                <form onSubmit={createInterviewer} className="space-y-3">
+                  <input value={newIv.name} onChange={e => setNewIv(p => ({...p, name: e.target.value}))} placeholder="Full Name" className={FIELD} />
+                  <input type="email" value={newIv.email} onChange={e => setNewIv(p => ({...p, email: e.target.value}))} placeholder="Email address" className={FIELD} />
+                  <input type="password" value={newIv.password} onChange={e => setNewIv(p => ({...p, password: e.target.value}))} placeholder="Temporary password" className={FIELD} />
+                  <p className="text-xs text-gray-400">They will log in using this email + password.</p>
+                  <button type="submit" disabled={saving}
+                    className="w-full py-3 rounded-xl bg-purple-600 text-white font-bold hover:opacity-90 transition-all disabled:opacity-60 flex items-center justify-center gap-2 text-sm">
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                    {saving ? 'Creating…' : 'Create Interviewer Account'}
+                  </button>
+                </form>
+              </div>
+            </div>
           )}
 
           {/* BULK CREATE */}

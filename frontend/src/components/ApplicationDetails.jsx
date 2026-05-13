@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   ChevronLeft, CheckCircle, Clock, AlertCircle, Trophy, FileText,
-  Code2, Calendar, Upload, Loader2, Star, Shield, Briefcase
+  Code2, Calendar, Upload, Loader2, Star, Shield, Briefcase, Video
 } from 'lucide-react';
 import MCQAssessment from './MCQAssessment';
 import CodingAssessment from './CodingAssessment';
 import SlotPicker from './SlotPicker';
+import InterviewRoom from './InterviewRoom';
 
 const API_BASE = 'http://localhost:8006';
 
@@ -66,15 +67,32 @@ const pipelineIndex = (status) => {
 
 const ApplicationDetails = ({ application, onBack }) => {
   const [app, setApp] = useState(application);
-  const [test, setTest] = useState(null); // full test session from backend
-  const [phase, setPhase] = useState(null); // null | 'mcq' | 'coding'
+  const [test, setTest] = useState(null);
+  const [phase, setPhase] = useState(null);
   const [mcqAnswers, setMcqAnswers] = useState({});
   const [showSlotPicker, setShowSlotPicker] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [loadingTest, setLoadingTest] = useState(false);
+  const [interviewSession, setInterviewSession] = useState(null); // active interview session
+  const [activeInterview, setActiveInterview] = useState(false); // show InterviewRoom
 
   const token = localStorage.getItem('token');
+
+  // Load my interview session if scheduled
+  useEffect(() => {
+    if (app.status === 'interview_scheduled' || app.status === 'interview_completed') {
+      fetch(`${API_BASE}/interview/my`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(sessions => {
+          const sess = Array.isArray(sessions)
+            ? sessions.find(s => s.application_id === (app.id || app.application_id))
+            : null;
+          if (sess) setInterviewSession(sess);
+        })
+        .catch(() => {});
+    }
+  }, [app.status]);
 
   const status = app.rawStatus || app.status;
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.applied;
@@ -169,11 +187,8 @@ const ApplicationDetails = ({ application, onBack }) => {
   if (phase === 'mcq' && test) {
     return (
       <MCQAssessment
-        test={test}
-        application={app}
-        token={token}
-        onBack={() => setPhase(null)}
-        onComplete={handleMcqComplete}
+        test={test} application={app} token={token}
+        onBack={() => setPhase(null)} onComplete={handleMcqComplete}
       />
     );
   }
@@ -182,13 +197,24 @@ const ApplicationDetails = ({ application, onBack }) => {
   if (phase === 'coding' && test) {
     return (
       <CodingAssessment
-        test={test}
-        mcqAnswers={mcqAnswers}
-        sessionId={test?.id}
-        application={app}
-        token={token}
+        test={test} mcqAnswers={mcqAnswers} sessionId={test?.id}
+        application={app} token={token}
         onBack={() => setPhase(null)}
         onSubmitAll={(payload) => handleFinalSubmit(payload.mcqAnswers, payload.codingAnswers)}
+      />
+    );
+  }
+
+  // Interview Room
+  if (activeInterview && interviewSession) {
+    return (
+      <InterviewRoom
+        session={interviewSession}
+        role="candidate"
+        token={token}
+        interviewerName={interviewSession.interviewer_name}
+        candidateName={app.name}
+        onLeave={() => { setActiveInterview(false); }}
       />
     );
   }
@@ -197,9 +223,16 @@ const ApplicationDetails = ({ application, onBack }) => {
   if (showSlotPicker) {
     return (
       <SlotPicker
-        jobId={app.jobId || app.job_id}
+        jobId={app.job_id || app.jobId}
         applicationId={app.id}
-        onBooked={() => { setShowSlotPicker(false); refresh(); }}
+        token={token}
+        onBooked={(bookingInfo) => {
+          setShowSlotPicker(false);
+          // Immediately reflect the status change locally so the UI updates
+          setApp(prev => ({ ...prev, status: 'interview_scheduled', rawStatus: 'interview_scheduled' }));
+          if (bookingInfo?.session) setInterviewSession(bookingInfo.session);
+          refresh();
+        }}
         onBack={() => setShowSlotPicker(false)}
       />
     );
@@ -356,12 +389,29 @@ const ApplicationDetails = ({ application, onBack }) => {
           </motion.div>
         )}
 
-        {/* Interview Scheduled Info */}
+        {/* Interview Scheduled Info + Join Button */}
         {status === 'interview_scheduled' && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
             className="bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800 rounded-2xl p-5">
-            <p className="font-bold text-purple-700 dark:text-purple-300 flex items-center gap-2 mb-2"><Calendar className="w-5 h-5" /> Interview Confirmed</p>
-            <p className="text-sm text-text/70 dark:text-dark-text/70">Your interview is scheduled. You'll receive details via email. Check back after your interview for results.</p>
+            <p className="font-bold text-purple-700 dark:text-purple-300 flex items-center gap-2 mb-3">
+              <Calendar className="w-5 h-5" /> Interview Confirmed
+            </p>
+            {interviewSession && (
+              <div className="mb-4 space-y-1 text-sm text-text/70 dark:text-dark-text/70">
+                <p>📅 {new Date(interviewSession.scheduled_at).toLocaleString()}</p>
+                <p>👤 Interviewer: <span className="font-semibold">{interviewSession.interviewer_name}</span></p>
+                <p>⏱ Duration: {interviewSession.duration_minutes} minutes</p>
+              </div>
+            )}
+            {interviewSession && (
+              <button onClick={() => setActiveInterview(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white font-bold rounded-xl hover:opacity-90 transition-all">
+                <Video className="w-5 h-5" /> Join Interview Room
+              </button>
+            )}
+            {!interviewSession && (
+              <p className="text-sm text-text/60 dark:text-dark-text/60">Interview details loading…</p>
+            )}
           </motion.div>
         )}
 

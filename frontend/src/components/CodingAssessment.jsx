@@ -210,8 +210,10 @@ const CodingAssessment = ({ test, mcqAnswers, sessionId, application, token, onB
           }
 
           const expected = String(tc.expected ?? '').trim();
-          const passed = actual.trim() === expected && r.statusId === 3;
-          results.push({ id: idx + 1, input: tc.input, expected, actual: actual.trim(), passed, time: r.time, memory: r.memory });
+          // Strip surrounding quotes if the expected was saved with them (e.g. '"abc"' → 'abc')
+          const expectedClean = expected.replace(/^['"](.+)['"]$/, '$1');
+          const passed = actual.trim() === expectedClean && r.statusId === 3;
+          results.push({ id: idx + 1, input: tc.input, expected: expectedClean, actual: actual.trim(), passed, time: r.time, memory: r.memory });
         } catch (err) {
           results.push({ id: idx + 1, input: tc.input, expected: tc.expected, actual: `Network Error: ${err.message}`, passed: false });
         }

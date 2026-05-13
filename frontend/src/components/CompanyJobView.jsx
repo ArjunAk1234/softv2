@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, Users, User, Trophy, Loader2, ChevronDown, ChevronUp,
-  Shield, Calendar, Send, CheckCircle, Megaphone, Code2
+  Shield, Calendar, Send, CheckCircle, Megaphone, Code2, RefreshCw
 } from 'lucide-react';
 import InterviewScheduler from './InterviewScheduler';
 import CreateJobTestModal from './CreateJobTestModal';
@@ -32,7 +32,9 @@ const NEXT_ACTIONS = {
 
 const ScorePill = ({ label, value, color }) => (
   <div className="text-center">
-    <div className={`text-lg font-bold ${color}`}>{value != null ? `${Math.round(value)}%` : '—'}</div>
+    <div className={`text-lg font-bold ${color}`}>
+      {value != null ? `${Math.round(value)}` : '—'}
+    </div>
     <div className="text-xs text-gray-400">{label}</div>
   </div>
 );
@@ -42,6 +44,7 @@ const CandidateRow = ({ app, token, onStatusChange }) => {
   const [updating, setUpdating] = useState(false);
   const s = STATUS_LABELS[app.status] || { label: app.status, cls: 'bg-gray-100 text-gray-600' };
   const actions = NEXT_ACTIONS[app.status] || [];
+  const totalViolations = (app.tab_switches || 0) + (app.window_switches || 0);
 
   const updateStatus = async (status) => {
     setUpdating(true);
@@ -70,6 +73,11 @@ const CandidateRow = ({ app, token, onStatusChange }) => {
                 <Shield className="w-3 h-3" /> Flagged
               </span>
             )}
+            {totalViolations > 3 && (
+              <span className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 text-xs rounded-full font-bold">
+                ⚠ {totalViolations} violations
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-400 truncate">{app.email}</p>
         </div>
@@ -77,6 +85,7 @@ const CandidateRow = ({ app, token, onStatusChange }) => {
           <ScorePill label="Resume" value={app.resume_score} color="text-blue-500" />
           <ScorePill label="Test" value={app.test_score} color="text-yellow-500" />
           <ScorePill label="Interview" value={app.interview_score} color="text-purple-500" />
+          {app.final_score != null && <ScorePill label="Final" value={app.final_score} color="text-green-500" />}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${s.cls}`}>{s.label}</span>
@@ -96,18 +105,34 @@ const CandidateRow = ({ app, token, onStatusChange }) => {
         {expanded && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}
             className="overflow-hidden border-t border-secondary/10 dark:border-dark-secondary/10 bg-secondary/3 dark:bg-dark-secondary/5 p-5">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
               <div><p className="text-xs text-gray-400 mb-1">Experience</p><p className="font-semibold text-text dark:text-dark-text">{app.experience_years ?? '—'} yrs</p></div>
               <div><p className="text-xs text-gray-400 mb-1">Applied</p><p className="font-semibold text-text dark:text-dark-text">{new Date(app.created_at).toLocaleDateString()}</p></div>
               <div><p className="text-xs text-gray-400 mb-1">Final Score</p>
                 <p className={`font-bold text-lg ${app.final_score >= 70 ? 'text-green-500' : app.final_score >= 40 ? 'text-yellow-500' : 'text-red-400'}`}>
-                  {app.final_score != null ? `${Math.round(app.final_score)}%` : '—'}
+                  {app.final_score != null ? `${Math.round(app.final_score)}` : '—'}
                 </p>
               </div>
-              <div><p className="text-xs text-gray-400 mb-1">Tab Switches</p>
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Tab Switches</p>
                 <p className={`font-semibold ${(app.tab_switches > 3) ? 'text-red-500' : 'text-text dark:text-dark-text'}`}>{app.tab_switches ?? 0}</p>
               </div>
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Window Switches</p>
+                <p className={`font-semibold ${(app.window_switches > 3) ? 'text-red-500' : 'text-text dark:text-dark-text'}`}>{app.window_switches ?? 0}</p>
+              </div>
             </div>
+            {/* Score breakdown */}
+            {(app.resume_score != null || app.test_score != null || app.interview_score != null) && (
+              <div className="flex gap-6 mb-4 p-3 bg-white/60 dark:bg-dark-background/60 rounded-xl">
+                {[['Resume', app.resume_score, 'text-blue-500'], ['Test', app.test_score, 'text-yellow-500'], ['Interview', app.interview_score, 'text-purple-500']].map(([l, v, c]) => (
+                  <div key={l} className="text-center">
+                    <p className={`text-xl font-black ${c}`}>{v != null ? Math.round(v) : '—'}</p>
+                    <p className="text-[11px] text-gray-400">{l}</p>
+                  </div>
+                ))}
+              </div>
+            )}
             {app.candidate_skills?.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-3">
                 {app.candidate_skills.map(sk => (
@@ -127,6 +152,7 @@ const CandidateRow = ({ app, token, onStatusChange }) => {
     </div>
   );
 };
+
 
 const RankingTab = ({ jobId, token, candidates, onStatusChange }) => {
   const [ranking, setRanking] = useState([]);
@@ -249,15 +275,37 @@ const CompanyJobView = ({ job, token, onBack }) => {
   const [candidates, setCandidates] = useState([]);
   const [showCreateTest, setShowCreateTest] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('candidates');
   const [showScheduler, setShowScheduler] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState(null);
 
+  const fetchCandidates = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    try {
+      const res = await fetch(`${API_BASE}/company/applicants/${job.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setCandidates(data);
+        setLastRefresh(new Date());
+      }
+    } catch (e) { console.error(e); }
+    if (!silent) setLoading(false);
+    else setRefreshing(false);
+  }, [job.id, token]);
+
+  // Initial load
+  useEffect(() => { fetchCandidates(false); }, [fetchCandidates]);
+
+  // Auto-refresh every 30 seconds to pick up new test submissions
   useEffect(() => {
-    fetch(`${API_BASE}/company/applicants/${job.id}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(data => { if (Array.isArray(data)) setCandidates(data); })
-      .catch(() => { }).finally(() => setLoading(false));
-  }, [job.id]);
+    const interval = setInterval(() => fetchCandidates(true), 30000);
+    return () => clearInterval(interval);
+  }, [fetchCandidates]);
 
   const handleStatusChange = (appId, newStatus) => {
     setCandidates(cs => cs.map(c => c.id === appId ? { ...c, status: newStatus } : c));
@@ -271,11 +319,7 @@ const CompanyJobView = ({ job, token, onBack }) => {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) {
-        // Refresh candidates
-        const d = await fetch(`${API_BASE}/company/applicants/${job.id}`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
-        if (Array.isArray(d)) setCandidates(d);
-      }
+      if (res.ok) await fetchCandidates(true);
     } catch (e) { console.error(e); }
     setBulkScreening(false);
   };
@@ -306,6 +350,12 @@ const CompanyJobView = ({ job, token, onBack }) => {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {/* Manual refresh with live indicator */}
+            <button onClick={() => fetchCandidates(true)} disabled={refreshing}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-text/60 dark:text-dark-text/60 hover:text-primary dark:hover:text-dark-primary border border-secondary/20 dark:border-dark-secondary/20 rounded-xl hover:border-primary/40 transition-all disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : lastRefresh ? `Updated ${lastRefresh.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : 'Refresh'}
+            </button>
             <button
               onClick={() => setShowCreateTest(true)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:opacity-90 transition-opacity"
