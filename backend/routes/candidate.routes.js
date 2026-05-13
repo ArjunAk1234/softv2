@@ -176,118 +176,74 @@ router.post("/applications/:appId/resume", upload.single("resume"), async (req, 
             console.warn("Resume parse failed, using profile data only:", parseErr.message);
         }
 
-        // ── Skill matching ───────────────────────────────────────────────────
+        // ── LLM Skill matching using Groq API ────────────────────────────────
         const jobSkills = Array.isArray(job.skills) ? job.skills : [];
         const candSkills = Array.isArray(cand.skills) ? cand.skills : [];
-
-        /**
-         * Normalize a skill string for comparison:
-         * "React.js" → "reactjs", "Node JS" → "nodejs", "C++" → "c"
-         * Keeps only alphanumeric so variations collapse to the same token.
-         */
-        const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
-
-        /**
-         * Build a rich token set from everything we know about the candidate:
-         *  - every whitespace-separated word in the resume (normalized)
-         *  - every word in each profile skill entry (normalized)
-         *  - the entire normalized skill string itself (e.g. "nodejs")
-         */
-        const candidateTokens = new Set();
-
-        const addToTokens = (text) => {
-            // raw words (handles "React.js" → ["react", "js"])
-            text.toLowerCase()
-                .replace(/[^a-z0-9\s]/g, " ")
-                .split(/\s+/)
-                .filter(t => t.length > 1)
-                .forEach(t => candidateTokens.add(t));
-
-            // fully-normalized form (handles "React.js" → "reactjs")
-            const norm = normalize(text);
-            if (norm.length > 1) candidateTokens.add(norm);
+        
+        let aiData = {
+            score: 0,
+            recommendation: "reject",
+            summary: "Analysis failed.",
+            strengths: [],
+            weaknesses: [],
+            skill_gaps: jobSkills,
+            skill_matches: [],
         };
 
-        // Add resume text words
-        if (resumeText) addToTokens(resumeText);
+        try {
+            const prompt = `You are an expert technical recruiter AI. Analyze the candidate's resume and profile against the job description.
+            
+Job Title: ${job.title || "N/A"}
+Job Description: ${job.description || "N/A"}
+Required Skills: ${jobSkills.join(", ")}
 
-        // Add every candidate profile skill (both as a phrase and word-by-word)
-        for (const skill of candSkills) {
-            addToTokens(skill);
-        }
+Candidate Experience: ${cand.experience_years || 0} years
+Candidate Profile Skills: ${candSkills.join(", ")}
 
-        /**
-         * Match a single job skill against the candidate token set.
-         * Strategy (in order of confidence):
-         *  1. Exact normalized match         → "reactjs" in tokens
-         *  2. All words of skill present     → "machine" AND "learning" in tokens
-         *  3. Any significant word matches   → "react" found, skill is "React.js"
-         */
-        const skillMatches = (jobSkill) => {
-            const norm = normalize(jobSkill);
+Candidate Resume Text:
+${resumeText.substring(0, 4000)}
 
-            // 1. Full normalized form
-            if (candidateTokens.has(norm)) return true;
+Evaluate the candidate and return ONLY a JSON object with the following structure:
+{
+  "score": <number 0-100 based on fit>,
+  "recommendation": <"shortlist" if score >= 50, else "reject">,
+  "summary": "<1-2 sentence justification>",
+  "strengths": [<array of string strengths>],
+  "weaknesses": [<array of string weaknesses>],
+  "skill_gaps": [<array of missing skills from required skills>],
+  "skill_matches": [<array of matched skills from required skills>]
+}`;
 
-            // Split skill into individual meaningful words
-            const skillWords = jobSkill
-                .toLowerCase()
-                .replace(/[^a-z0-9\s]/g, " ")
-                .split(/\s+/)
-                .filter(w => w.length > 1);
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: "llama-3.3-70b-versatile",
+                    messages: [{ role: "user", content: prompt }],
+                    response_format: { type: "json_object" },
+                    temperature: 0.1
+                })
+            });
 
-            if (skillWords.length === 0) return false;
-
-            // 2. Every word of the skill is present
-            if (skillWords.every(w => candidateTokens.has(w))) return true;
-
-            // 3. Partial/abbreviation: resume token starts with skill's first meaningful word
-            //    e.g. job needs "postgres", resume has "postgresql"
-            const firstWord = skillWords[0];
-            if (firstWord.length >= 3) {
-                for (const token of candidateTokens) {
-                    if (token.startsWith(firstWord) || firstWord.startsWith(token)) {
-                        return true;
-                    }
-                }
+            if (response.ok) {
+                const data = await response.json();
+                const content = data.choices[0].message.content;
+                aiData = JSON.parse(content);
+            } else {
+                console.error("Groq API error:", await response.text());
+                aiData.summary = "AI analysis temporarily unavailable. Basic profile match applied.";
+                aiData.score = candSkills.length > 0 ? 50 : 20; 
+                aiData.recommendation = aiData.score >= 50 ? "shortlist" : "reject";
             }
-
-            return false;
-        };
-
-        const matchedSkills = [];
-        const missingSkills = [];
-
-        for (const js of jobSkills) {
-            (skillMatches(js) ? matchedSkills : missingSkills).push(js);
+        } catch (error) {
+            console.error("Groq API error:", error.message);
+            aiData.summary = "AI analysis failed due to server error.";
         }
 
-        // ── Scoring ──────────────────────────────────────────────────────────
-        const matchRatio = jobSkills.length > 0 ? matchedSkills.length / jobSkills.length : 1;
-        const expYears = Math.min(cand.experience_years || 0, 10); // cap at 10 yrs
-        const skillScore = Math.round(matchRatio * 70);              // up to 70 pts
-        const expScore = Math.round((expYears / 10) * 20);         // up to 20 pts
-        const resumeBonus = resumeText.trim().length > 100 ? 10 : 0;  // 10 pts if resume parsed
-        const score = Math.min(100, skillScore + expScore + resumeBonus);
-
-        // Shortlist if ≥50% skills matched OR overall score ≥ 45
-        const meetsSkillThreshold = jobSkills.length === 0 || matchRatio >= 0.5;
-        const meetsScoreThreshold = score >= 45;
-        const recommendation = (meetsSkillThreshold || meetsScoreThreshold) ? "shortlist" : "reject";
-
-        const aiData = {
-            score,
-            recommendation,
-            summary: resumeText
-                ? `Matched ${matchedSkills.length} of ${jobSkills.length} required skills from resume + profile.`
-                : `Resume could not be parsed; matched ${matchedSkills.length} of ${jobSkills.length} skills from profile.`,
-            strengths: matchedSkills.slice(0, 3),
-            weaknesses: missingSkills.slice(0, 2),
-            skill_gaps: missingSkills,
-            skill_matches: matchedSkills,
-        };
-
-        const newStatus = recommendation === "reject" ? "rejected" : "resume_reviewed";
+        const newStatus = aiData.recommendation === "reject" ? "rejected" : "resume_reviewed";
 
         await pool.query(
             `UPDATE applications
