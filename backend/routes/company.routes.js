@@ -361,15 +361,64 @@ router.post("/jobs/:jobId/generate-test-ai", async (req, res, next) => {
         const { jobId } = req.params;
         const jobRes = await pool.query("SELECT title, description, skills FROM jobs WHERE id=$1", [jobId]);
         const job = jobRes.rows[0];
-        let generatedData = {
-            mcqs: [
-                { question: "What is a variable?", options: ["A", "B", "C", "D"], correct_option: 0 },
-                { question: "What is React?", options: ["A", "B", "C", "D"], correct_option: 1 }
-            ],
-            coding: [
-                { title: "Reverse String", description: "Write a function to reverse a string." }
-            ]
-        };
+
+        const prompt = `You are an expert technical assessor. Generate exactly 10 multiple-choice questions (MCQs) for a technical assessment based on the following job requirements.
+
+Job Title: ${job.title || "N/A"}
+Job Description: ${job.description || "N/A"}
+Required Skills: ${Array.isArray(job.skills) ? job.skills.join(", ") : "N/A"}
+
+Return ONLY a JSON object with this exact structure:
+{
+  "mcqs": [
+    {
+      "question": "Question text here",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_option": <index of correct option, 0-3>,
+      "points": 10
+    }
+  ]
+}`;
+
+        let generatedData = { mcqs: [], coding: [] };
+
+        try {
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: "llama-3.3-70b-versatile",
+                    messages: [{ role: "user", content: prompt }],
+                    response_format: { type: "json_object" },
+                    temperature: 0.2
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const content = data.choices[0].message.content;
+                generatedData = JSON.parse(content);
+                if (!generatedData.coding) {
+                    generatedData.coding = [];
+                }
+            } else {
+                console.error("Groq API error:", await response.text());
+                throw new Error("Failed to generate test");
+            }
+        } catch (error) {
+            console.error("Groq API error:", error.message);
+            // Fallback
+            generatedData = {
+                mcqs: [
+                    { question: "What is a variable?", options: ["A", "B", "C", "D"], correct_option: 0, points: 10 }
+                ],
+                coding: []
+            };
+        }
+
         res.json({ suggested_test: generatedData });
     } catch (err) { next(err); }
 });

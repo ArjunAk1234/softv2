@@ -90,6 +90,35 @@ export default function CreateJobTestModal({ token, jobId, onClose, onCreated })
         load();
     }, [jobId, token]);
 
+    const [generatingAI, setGeneratingAI] = useState(false);
+
+    const generateAITest = async () => {
+        setGeneratingAI(true);
+        setError('');
+        try {
+            const res = await fetch(`${API_BASE}/company/jobs/${jobId}/generate-test-ai`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to generate AI test');
+            
+            if (data.suggested_test?.mcqs) {
+                setMcqQuestions(data.suggested_test.mcqs.map((mq, idx) => ({
+                    id: `m${Date.now()}${idx}`,
+                    question: mq.question || '',
+                    options: mq.options || ['', '', '', ''],
+                    correct_index: mq.correct_option ?? 0,
+                    points: mq.points ?? 10,
+                })));
+            }
+        } catch (err) {
+            setError('AI Generation Failed: ' + err.message);
+        } finally {
+            setGeneratingAI(false);
+        }
+    };
+
     // ── MCQ helpers ────────────────────────────────────────────
     const addMcq = () => setMcqQuestions(q => [...q, defaultMcq()]);
     const removeMcq = (i) => setMcqQuestions(q => q.filter((_, idx) => idx !== i));
@@ -261,6 +290,13 @@ export default function CreateJobTestModal({ token, jobId, onClose, onCreated })
                             {/* Step 1: MCQ */}
                             {step === 1 && (
                                 <div className="space-y-4">
+                                    <div className="flex justify-end">
+                                        <button onClick={generateAITest} disabled={generatingAI}
+                                            className="px-4 py-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-xl text-sm font-bold hover:bg-indigo-500/20 transition-all flex items-center gap-2">
+                                            {generatingAI ? <Loader2 className="w-4 h-4 animate-spin" /> : '🤖'} 
+                                            {generatingAI ? 'Generating MCQs...' : 'Generate 10 MCQs with AI'}
+                                        </button>
+                                    </div>
                                     {mcqQuestions.length === 0 ? (
                                         <div className="text-center py-12 border-2 border-dashed border-secondary/20 dark:border-dark-secondary/20 rounded-2xl">
                                             <BookOpen className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
