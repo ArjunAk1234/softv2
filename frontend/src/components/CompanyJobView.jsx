@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, Users, User, Trophy, Loader2, ChevronDown, ChevronUp,
-  Shield, Calendar, Send, CheckCircle, Megaphone, Code2, RefreshCw
+  Shield, Calendar, Send, CheckCircle, Megaphone, Code2, RefreshCw,
+  Eye, Zap, UserCheck, UserX, Star, Lock
 } from 'lucide-react';
 import InterviewScheduler from './InterviewScheduler';
 import CreateJobTestModal from './CreateJobTestModal';
@@ -271,6 +272,208 @@ const RankingTab = ({ jobId, token, candidates, onStatusChange }) => {
   );
 };
 
+// ── Publish Card (resume / test) ──────────────────────────────────────────────
+const PublishCard = ({ jobId, token, type, label }) => {
+  const [publishing, setPublishing] = useState(false);
+  const [done, setDone] = useState(false);
+  const endpoint = type === 'resume' ? 'publish-resume' : 'publish-test';
+
+  const publish = async () => {
+    setPublishing(true);
+    try {
+      const res = await fetch(`${API_BASE}/company/jobs/${jobId}/${endpoint}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setDone(true);
+    } catch {}
+    setPublishing(false);
+  };
+
+  return (
+    <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 ${done ? 'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800' : 'bg-white/60 dark:bg-dark-background/50 border-gray-200/80 dark:border-gray-700/60'}`}>
+      <div>
+        <p className="text-sm font-bold text-text dark:text-dark-text">{label}</p>
+        <p className="text-xs text-gray-400 mt-0.5">{done ? '✓ Published — candidates can now see scores' : 'Scores hidden from candidates until published'}</p>
+      </div>
+      <button onClick={publish} disabled={publishing || done}
+        className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all disabled:opacity-60 ${done ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-blue-600 text-white hover:opacity-90'}`}>
+        {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : done ? <CheckCircle className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        {done ? 'Published' : 'Publish'}
+      </button>
+    </div>
+  );
+};
+
+// ── Interview Results Panel ───────────────────────────────────────────────────
+const InterviewResultsTab = ({ jobId, token, onUpdate }) => {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [pubMsg, setPubMsg] = useState('');
+  const [topN, setTopN] = useState(1);
+  const [autoHiring, setAutoHiring] = useState(false);
+  const [autoHireMsg, setAutoHireMsg] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/company/ranking/${jobId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) setResults(data);
+    } catch {}
+    setLoading(false);
+  }, [jobId, token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const publishFinal = async () => {
+    setPublishing(true);
+    try {
+      await fetch(`${API_BASE}/company/jobs/${jobId}/publish-results`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }
+      });
+      setPubMsg('✓ Final results published to candidates');
+    } catch { setPubMsg('Error publishing'); }
+    setPublishing(false);
+  };
+
+  const hireCandidate = async (appId) => {
+    await fetch(`${API_BASE}/company/applications/${appId}/hire`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }
+    });
+    setResults(r => r.map(x => x.application_id === appId ? { ...x, status: 'hired' } : x));
+    if (onUpdate) onUpdate();
+  };
+
+  const rejectCandidate = async (appId) => {
+    await fetch(`${API_BASE}/company/applications/${appId}/reject`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }
+    });
+    setResults(r => r.map(x => x.application_id === appId ? { ...x, status: 'rejected' } : x));
+    if (onUpdate) onUpdate();
+  };
+
+  const autoHire = async () => {
+    setAutoHiring(true);
+    try {
+      const res = await fetch(`${API_BASE}/company/jobs/${jobId}/auto-hire`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ topN })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAutoHireMsg(`✓ Hired top ${data.hired} candidate(s), others rejected`);
+        load();
+        if (onUpdate) onUpdate();
+      } else {
+        setAutoHireMsg(data.error || 'Auto-hire failed');
+      }
+    } catch { setAutoHireMsg('Error'); }
+    setAutoHiring(false);
+  };
+
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary dark:text-dark-primary" /></div>;
+  if (!results.length) return (
+    <div className="text-center py-16">
+      <Trophy className="w-14 h-14 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+      <p className="text-gray-400">No completed interviews yet</p>
+      <p className="text-xs text-gray-500 mt-1">Candidates appear here after their interview score is submitted</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* Controls row */}
+      <div className="flex flex-wrap gap-3 items-center justify-between bg-white/60 dark:bg-dark-background/50 border border-gray-200/80 dark:border-gray-700/60 rounded-2xl p-4">
+        <div>
+          <p className="text-sm font-bold text-text dark:text-dark-text">{results.length} candidates with complete scores</p>
+          {pubMsg && <p className="text-xs text-green-600 dark:text-green-400 mt-0.5 font-semibold flex items-center gap-1"><CheckCircle className="w-3 h-3" />{pubMsg}</p>}
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Auto hire */}
+          <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl px-3 py-2">
+            <Zap className="w-4 h-4 text-green-600 dark:text-green-400" />
+            <span className="text-xs font-semibold text-green-700 dark:text-green-300">Auto-hire top</span>
+            <input type="number" min={1} max={results.length} value={topN}
+              onChange={e => setTopN(Number(e.target.value))}
+              className="w-12 text-center text-sm font-bold bg-white dark:bg-dark-background border border-green-300 dark:border-green-700 rounded-lg px-1 py-0.5 text-text dark:text-dark-text" />
+            <button onClick={autoHire} disabled={autoHiring}
+              className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-500 disabled:opacity-60 flex items-center gap-1">
+              {autoHiring ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />} Hire
+            </button>
+          </div>
+          {autoHireMsg && <span className="text-xs font-semibold text-green-600 dark:text-green-400">{autoHireMsg}</span>}
+          <button onClick={publishFinal} disabled={publishing}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:opacity-90 transition-all disabled:opacity-60">
+            {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+            Publish Final Results
+          </button>
+        </div>
+      </div>
+
+      {/* Candidate rows */}
+      {results.map((r, i) => (
+        <div key={r.application_id}
+          className={`flex flex-col sm:flex-row sm:items-center gap-4 p-5 rounded-2xl border ${
+            r.status === 'hired' ? 'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800' :
+            r.status === 'rejected' ? 'bg-red-50/50 dark:bg-red-900/5 border-red-200/50 dark:border-red-900/30 opacity-60' :
+            'bg-white/60 dark:bg-dark-background/50 border-gray-200/80 dark:border-gray-700/60'
+          }`}>
+          {/* Rank badge */}
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-lg flex-shrink-0 ${
+            i === 0 ? 'bg-yellow-400 text-white' : i === 1 ? 'bg-gray-300 dark:bg-gray-500 text-white' : i === 2 ? 'bg-amber-600 text-white' : 'bg-secondary/20 dark:bg-dark-secondary/20 text-text/60 dark:text-dark-text/60'
+          }`}>{i + 1}</div>
+
+          {/* Name & email */}
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-text dark:text-dark-text">{r.name}</p>
+            <p className="text-sm text-gray-400 truncate">{r.email}</p>
+            {r.is_flagged && <span className="text-xs text-red-500 font-bold flex items-center gap-1 mt-0.5"><Shield className="w-3 h-3" /> Flagged</span>}
+            {r.interviewer_feedback && <p className="text-xs text-gray-500 mt-1 italic line-clamp-1">"{r.interviewer_feedback}"</p>}
+          </div>
+
+          {/* Scores */}
+          <div className="flex gap-4 text-center">
+            {[['Resume', r.resume_score, 'text-blue-500'], ['Test', r.test_score, 'text-yellow-500'], ['Interview', r.interview_score, 'text-purple-500']].map(([l, v, c]) => (
+              <div key={l}>
+                <p className={`text-xl font-black ${c}`}>{v != null ? Math.round(v) : '—'}</p>
+                <p className="text-[11px] text-gray-400">{l}</p>
+              </div>
+            ))}
+            <div className="border-l border-secondary/20 dark:border-dark-secondary/20 pl-4">
+              <p className={`text-xl font-black ${r.final_score >= 70 ? 'text-green-500' : 'text-yellow-500'}`}>{r.final_score != null ? Math.round(r.final_score) : '—'}%</p>
+              <p className="text-[11px] text-gray-400">Final</p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 flex-shrink-0">
+            {r.status === 'hired' ? (
+              <span className="px-4 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-xl text-sm font-bold flex items-center gap-1.5"><UserCheck className="w-4 h-4" /> Hired</span>
+            ) : r.status === 'rejected' ? (
+              <span className="px-4 py-2 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-sm font-bold flex items-center gap-1.5"><UserX className="w-4 h-4" /> Rejected</span>
+            ) : (
+              <>
+                <button onClick={() => hireCandidate(r.application_id)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-500 transition-colors flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4" /> Hire
+                </button>
+                <button onClick={() => rejectCandidate(r.application_id)}
+                  className="px-4 py-2 bg-red-500 text-white rounded-xl text-sm font-bold hover:bg-red-400 transition-colors flex items-center gap-1.5">
+                  <UserX className="w-4 h-4" /> Reject
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const CompanyJobView = ({ job, token, onBack }) => {
   const [candidates, setCandidates] = useState([]);
   const [showCreateTest, setShowCreateTest] = useState(false);
@@ -388,13 +591,14 @@ const CompanyJobView = ({ job, token, onBack }) => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 border-b border-secondary/20 dark:border-dark-secondary/20">
+        <div className="flex gap-2 border-b border-secondary/20 dark:border-dark-secondary/20 overflow-x-auto">
           {[
             { id: 'candidates', label: 'Candidates', icon: Users },
             { id: 'ranking', label: 'Scores & Ranking', icon: Trophy },
+            { id: 'interview_results', label: 'Interview Results', icon: Star },
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-5 py-3 font-semibold text-sm border-b-2 transition-all -mb-px ${activeTab === tab.id ? 'border-primary dark:border-dark-primary text-primary dark:text-dark-primary' : 'border-transparent text-text/50 dark:text-dark-text/50 hover:text-text dark:hover:text-dark-text'}`}>
+              className={`flex items-center gap-2 px-5 py-3 font-semibold text-sm border-b-2 transition-all -mb-px whitespace-nowrap ${activeTab === tab.id ? 'border-primary dark:border-dark-primary text-primary dark:text-dark-primary' : 'border-transparent text-text/50 dark:text-dark-text/50 hover:text-text dark:hover:text-dark-text'}`}>
               <tab.icon className="w-4 h-4" />{tab.label}
             </button>
           ))}
@@ -434,6 +638,17 @@ const CompanyJobView = ({ job, token, onBack }) => {
 
         {activeTab === 'ranking' && (
           <RankingTab jobId={job.id} token={token} candidates={candidates} onStatusChange={handleStatusChange} />
+        )}
+
+        {activeTab === 'interview_results' && (
+          <div className="space-y-4">
+            {/* Publish resume/test controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <PublishCard jobId={job.id} token={token} type="resume" label="Resume Screening Results" />
+              <PublishCard jobId={job.id} token={token} type="test" label="Assessment / Test Results" />
+            </div>
+            <InterviewResultsTab jobId={job.id} token={token} onUpdate={() => fetchCandidates(true)} />
+          </div>
         )}
       </div>
 

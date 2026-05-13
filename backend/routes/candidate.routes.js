@@ -303,13 +303,17 @@ router.post("/applications/:appId/resume", upload.single("resume"), async (req, 
 router.get("/applications", async (req, res, next) => {
     try {
         const { rows } = await pool.query(
-            `SELECT a.*, j.title AS job_title, j.location, j.job_type, c.company_name
-       FROM applications a JOIN jobs j ON j.id=a.job_id JOIN companies c ON c.id=j.company_id
-       WHERE a.candidate_id=$1 ORDER BY a.created_at DESC`, [req.user.id]
+            `SELECT a.*, j.title AS job_title, j.location, j.job_type, c.company_name,
+               j.resume_results_published, j.test_results_published, j.results_published
+             FROM applications a
+             JOIN jobs j ON j.id=a.job_id
+             JOIN companies c ON c.id=j.company_id
+             WHERE a.candidate_id=$1 ORDER BY a.created_at DESC`, [req.user.id]
         );
         res.json(rows);
     } catch (err) { next(err); }
 });
+
 
 // GET /api/candidate/profile
 router.get("/profile", async (req, res, next) => {

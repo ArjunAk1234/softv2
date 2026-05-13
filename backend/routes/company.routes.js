@@ -132,6 +132,91 @@ router.patch("/applications/:appId/status", async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
+// ── PUBLISH resume results to candidates ──────────────────────────────────────
+// POST /api/company/jobs/:jobId/publish-resume
+router.post("/jobs/:jobId/publish-resume", async (req, res, next) => {
+    try {
+        await pool.query("UPDATE jobs SET resume_results_published=true WHERE id=$1", [req.params.jobId]);
+        res.json({ message: "Resume results published" });
+    } catch (err) { next(err); }
+});
+
+// ── PUBLISH test/assessment results to candidates ─────────────────────────────
+// POST /api/company/jobs/:jobId/publish-test
+router.post("/jobs/:jobId/publish-test", async (req, res, next) => {
+    try {
+        await pool.query("UPDATE jobs SET test_results_published=true WHERE id=$1", [req.params.jobId]);
+        res.json({ message: "Test results published" });
+    } catch (err) { next(err); }
+});
+
+// ── PUBLISH final interview results ──────────────────────────────────────────
+// POST /api/company/jobs/:jobId/publish-results
+router.post("/jobs/:jobId/publish-results", async (req, res, next) => {
+    try {
+        await pool.query("UPDATE jobs SET results_published=true WHERE id=$1", [req.params.jobId]);
+        res.json({ message: "Final results published" });
+    } catch (err) { next(err); }
+});
+
+// ── AUTO-HIRE top N candidates ───────────────────────────────────────────────
+// POST /api/company/jobs/:jobId/auto-hire  body: { topN: 3 }
+router.post("/jobs/:jobId/auto-hire", async (req, res, next) => {
+    try {
+        const { topN } = req.body;
+        if (!topN || topN < 1) return res.status(400).json({ error: "topN must be >= 1" });
+
+        // Get top N by final_score among interview_completed
+        const { rows: top } = await pool.query(
+            `SELECT id FROM applications
+             WHERE job_id=$1 AND status='interview_completed' AND final_score IS NOT NULL
+             ORDER BY final_score DESC LIMIT $2`,
+            [req.params.jobId, topN]
+        );
+        if (!top.length) return res.status(404).json({ error: "No eligible candidates" });
+
+        const ids = top.map(r => r.id);
+        // Hire top N
+        await pool.query(
+            `UPDATE applications SET status='hired', updated_at=NOW() WHERE id = ANY($1)`,
+            [ids]
+        );
+        // Reject the rest who completed interview
+        await pool.query(
+            `UPDATE applications SET status='rejected', updated_at=NOW()
+             WHERE job_id=$1 AND status='interview_completed' AND id != ALL($2)`,
+            [req.params.jobId, ids]
+        );
+        res.json({ hired: ids.length, hiredIds: ids });
+    } catch (err) { next(err); }
+});
+
+// ── HIRE single candidate ────────────────────────────────────────────────────
+// POST /api/company/applications/:appId/hire
+router.post("/applications/:appId/hire", async (req, res, next) => {
+    try {
+        const { rows } = await pool.query(
+            "UPDATE applications SET status='hired', updated_at=NOW() WHERE id=$1 RETURNING *",
+            [req.params.appId]
+        );
+        res.json(rows[0]);
+    } catch (err) { next(err); }
+});
+
+// ── REJECT single candidate ──────────────────────────────────────────────────
+// POST /api/company/applications/:appId/reject
+router.post("/applications/:appId/reject", async (req, res, next) => {
+    try {
+        const { rows } = await pool.query(
+            "UPDATE applications SET status='rejected', updated_at=NOW() WHERE id=$1 RETURNING *",
+            [req.params.appId]
+        );
+        res.json(rows[0]);
+    } catch (err) { next(err); }
+});
+
+
+
 // GET /api/company/dashboard
 router.get("/dashboard", async (req, res, next) => {
     try {

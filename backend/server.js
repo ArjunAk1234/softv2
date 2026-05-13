@@ -41,6 +41,12 @@ io.on("connection", (socket) => {
     socket.to(`interview_${sessionId}`).emit("peer_joined", { role });
   });
 
+  // Interviewer ends the session — broadcast to candidate
+  socket.on("end_interview", ({ sessionId }) => {
+    socket.to(`interview_${sessionId}`).emit("interview_ended");
+    console.log(`Interview room ${sessionId} ended by interviewer`);
+  });
+
   // Real-time interview chat/events
   socket.on("interview_event", ({ sessionId, type, data }) => {
     socket.to(`interview_${sessionId}`).emit("interview_event", { type, data });

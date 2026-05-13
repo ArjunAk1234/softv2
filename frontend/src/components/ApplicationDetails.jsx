@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   ChevronLeft, CheckCircle, Clock, AlertCircle, Trophy, FileText,
-  Code2, Calendar, Upload, Loader2, Star, Shield, Briefcase, Video
+  Code2, Calendar, Upload, Loader2, Star, Shield, Briefcase, Video, Lock
 } from 'lucide-react';
 import MCQAssessment from './MCQAssessment';
 import CodingAssessment from './CodingAssessment';
 import SlotPicker from './SlotPicker';
 import InterviewRoom from './InterviewRoom';
+
 
 const API_BASE = 'http://localhost:8006';
 
@@ -22,7 +23,7 @@ const STATUS_MAP = {
   test_in_progress: { label: 'Test In Progress', icon: Code2, color: 'orange', desc: 'You have an active test session.' },
   test_completed: { label: 'Test Completed ✓', icon: CheckCircle, color: 'teal', desc: 'Test done! Schedule your interview.' },
   interview_scheduled: { label: 'Interview Scheduled', icon: Calendar, color: 'purple', desc: 'Your interview is confirmed.' },
-  interview_completed: { label: 'Interview Done', icon: CheckCircle, color: 'violet', desc: 'Awaiting final decision.' },
+  interview_completed: { label: '⏳ Evaluation Pending', icon: Clock, color: 'violet', desc: 'Interview done. Waiting for company to publish results.' },
   hired: { label: '🎉 Hired!', icon: Trophy, color: 'green', desc: 'Congratulations! You got the job!' },
 };
 
@@ -296,26 +297,43 @@ const ApplicationDetails = ({ application, onBack }) => {
           </motion.div>
         )}
 
-        {/* Scores */}
-        {(app.resumeScore != null || app.resume_score != null || app.testScore != null || app.test_score != null) && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-            className="bg-white/60 dark:bg-dark-background/50 border border-gray-200/80 dark:border-gray-700/60 rounded-2xl p-5">
-            <p className="text-sm font-bold text-text/60 dark:text-dark-text/60 uppercase tracking-wider mb-4">Your Scores</p>
-            <ScoreBar label="Resume / AI Screening (30%)" score={app.resumeScore ?? app.resume_score} />
-            <ScoreBar label="Technical Test (30%)" score={app.testScore ?? app.test_score} />
-            <ScoreBar label="Interview (40%)" score={app.interviewScore ?? app.interview_score} />
-            {(app.finalScore ?? app.final_score) != null && (
-              <div className="mt-4 pt-4 border-t border-secondary/10 dark:border-dark-secondary/10">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-text dark:text-dark-text">Final Score</span>
-                  <span className={`text-2xl font-black ${(app.finalScore ?? app.final_score) >= 70 ? 'text-green-500' : 'text-yellow-500'}`}>
-                    {Math.round(app.finalScore ?? app.final_score)}%
-                  </span>
+        {/* Scores — only shown after company publishes */}
+        {(() => {
+          const resumePub = app.resume_results_published;
+          const testPub = app.test_results_published;
+          const finalPub = app.results_published;
+          const hasAnyScore = app.resumeScore != null || app.resume_score != null || app.testScore != null || app.test_score != null;
+          if (!hasAnyScore) return null;
+          return (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+              className="bg-white/60 dark:bg-dark-background/50 border border-gray-200/80 dark:border-gray-700/60 rounded-2xl p-5">
+              <p className="text-sm font-bold text-text/60 dark:text-dark-text/60 uppercase tracking-wider mb-4">Your Scores</p>
+              {resumePub ? (
+                <ScoreBar label="Resume / AI Screening (30%)" score={app.resumeScore ?? app.resume_score} />
+              ) : (
+                <div className="flex items-center gap-2 mb-4 text-sm text-gray-400"><Lock className="w-4 h-4" /> Resume score not published yet</div>
+              )}
+              {testPub ? (
+                <ScoreBar label="Technical Test (30%)" score={app.testScore ?? app.test_score} />
+              ) : (app.testScore != null || app.test_score != null) ? (
+                <div className="flex items-center gap-2 mb-4 text-sm text-gray-400"><Lock className="w-4 h-4" /> Test score not published yet</div>
+              ) : null}
+              {finalPub && (app.interviewScore ?? app.interview_score) != null && (
+                <ScoreBar label="Interview (40%)" score={app.interviewScore ?? app.interview_score} />
+              )}
+              {finalPub && (app.finalScore ?? app.final_score) != null && (
+                <div className="mt-4 pt-4 border-t border-secondary/10 dark:border-dark-secondary/10">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-text dark:text-dark-text">Final Score</span>
+                    <span className={`text-2xl font-black ${(app.finalScore ?? app.final_score) >= 70 ? 'text-green-500' : 'text-yellow-500'}`}>
+                      {Math.round(app.finalScore ?? app.final_score)}%
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )}
-          </motion.div>
-        )}
+              )}
+            </motion.div>
+          );
+        })()}
 
         {/* AI Resume Feedback */}
         {(app.aiFeedback || app.ai_resume_feedback) && (() => {
@@ -386,6 +404,16 @@ const ApplicationDetails = ({ application, onBack }) => {
               className="px-8 py-3 bg-purple-600 text-white font-bold rounded-xl hover:opacity-90 transition-all flex items-center gap-2 mx-auto">
               <Calendar className="w-5 h-5" /> Choose Interview Slot
             </button>
+          </motion.div>
+        )}
+
+        {/* Interview Completed — Evaluation Pending */}
+        {status === 'interview_completed' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+            className="bg-violet-50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 rounded-2xl p-5 text-center">
+            <Clock className="w-12 h-12 text-violet-400 mx-auto mb-3" />
+            <h3 className="text-lg font-bold text-text dark:text-dark-text mb-1">Evaluation Pending</h3>
+            <p className="text-sm text-text/60 dark:text-dark-text/60">Your interview has been scored. The company will review and publish final results soon.</p>
           </motion.div>
         )}
 
