@@ -75,25 +75,49 @@ const ApplicationDetails = ({ application, onBack }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [loadingTest, setLoadingTest] = useState(false);
-  const [interviewSession, setInterviewSession] = useState(null); // active interview session
-  const [activeInterview, setActiveInterview] = useState(false); // show InterviewRoom
+  const [interviewSession, setInterviewSession] = useState(null);
+  const [joiningInterview, setJoiningInterview] = useState(false); // loading while fetching session
+  const [joinError, setJoinError] = useState('');
+  const [activeInterview, setActiveInterview] = useState(false);
 
   const token = localStorage.getItem('token');
 
-  // Load my interview session if scheduled
-  useEffect(() => {
-    if (app.status === 'interview_scheduled' || app.status === 'interview_completed') {
-      fetch(`${API_BASE}/interview/my`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(sessions => {
-          const sess = Array.isArray(sessions)
-            ? sessions.find(s => s.application_id === (app.id || app.application_id))
-            : null;
-          if (sess) setInterviewSession(sess);
-        })
-        .catch(() => {});
+  // Fetch session directly when candidate clicks "Join Interview Room"
+  const handleJoinInterview = async () => {
+    // Already have session — open directly
+    if (interviewSession?.id) { setActiveInterview(true); return; }
+
+    setJoiningInterview(true);
+    setJoinError('');
+    const appId = app.id || app.application_id;
+    try {
+      const res = await fetch(`${API_BASE}/interview/by-app/${appId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const sess = await res.json();
+        setInterviewSession(sess);
+        setActiveInterview(true);
+      } else {
+        // Fallback: try /interview/my
+        const r2 = await fetch(`${API_BASE}/interview/my`, { headers: { Authorization: `Bearer ${token}` } });
+        const sessions = await r2.json();
+        const found = Array.isArray(sessions)
+          ? sessions.find(s => Number(s.application_id) === Number(appId))
+          : null;
+        if (found) {
+          setInterviewSession(found);
+          setActiveInterview(true);
+        } else {
+          setJoinError('Interview session not found. Please contact your recruiter.');
+        }
+      }
+    } catch {
+      setJoinError('Network error. Please check your connection.');
     }
-  }, [app.status]);
+    setJoiningInterview(false);
+  };
+
 
   const status = app.rawStatus || app.status;
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.applied;
@@ -206,20 +230,19 @@ const ApplicationDetails = ({ application, onBack }) => {
     );
   }
 
-  // Interview Room
-  if (activeInterview && interviewSession) {
+  // Interview Room — only opens after session is confirmed
+  if (activeInterview && interviewSession?.id) {
     return (
       <InterviewRoom
         session={interviewSession}
         role="candidate"
         token={token}
-        interviewerName={interviewSession.interviewer_name}
+        interviewerName={interviewSession.interviewer_name || 'Interviewer'}
         candidateName={app.name}
-        onLeave={() => { setActiveInterview(false); }}
+        onLeave={() => setActiveInterview(false)}
       />
     );
   }
-
 
   if (showSlotPicker) {
     return (
@@ -424,22 +447,27 @@ const ApplicationDetails = ({ application, onBack }) => {
             <p className="font-bold text-purple-700 dark:text-purple-300 flex items-center gap-2 mb-3">
               <Calendar className="w-5 h-5" /> Interview Confirmed
             </p>
-            {interviewSession && (
-              <div className="mb-4 space-y-1 text-sm text-text/70 dark:text-dark-text/70">
-                <p>📅 {new Date(interviewSession.scheduled_at).toLocaleString()}</p>
-                <p>👤 Interviewer: <span className="font-semibold">{interviewSession.interviewer_name}</span></p>
-                <p>⏱ Duration: {interviewSession.duration_minutes} minutes</p>
-              </div>
-            )}
-            {interviewSession && (
-              <button onClick={() => setActiveInterview(true)}
-                className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white font-bold rounded-xl hover:opacity-90 transition-all">
-                <Video className="w-5 h-5" /> Join Interview Room
+            {/* Join button */}
+            <div className="flex flex-col gap-2">
+              {interviewSession && (
+                <div className="space-y-1 text-sm text-text/70 dark:text-dark-text/70 mb-2">
+                  <p>📅 {new Date(interviewSession.scheduled_at).toLocaleString()}</p>
+                  <p>👤 Interviewer: <span className="font-semibold">{interviewSession.interviewer_name}</span></p>
+                  <p>⏱ Duration: {interviewSession.duration_minutes} minutes</p>
+                </div>
+              )}
+              {joinError && (
+                <p className="text-sm text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-xl">{joinError}</p>
+              )}
+              <button
+                onClick={handleJoinInterview}
+                disabled={joiningInterview}
+                className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white font-bold rounded-xl hover:opacity-90 transition-all disabled:opacity-60">
+                {joiningInterview
+                  ? <><Loader2 className="w-5 h-5 animate-spin" /> Joining…</>
+                  : <><Video className="w-5 h-5" /> Join Interview Room</>}
               </button>
-            )}
-            {!interviewSession && (
-              <p className="text-sm text-text/60 dark:text-dark-text/60">Interview details loading…</p>
-            )}
+            </div>
           </motion.div>
         )}
 

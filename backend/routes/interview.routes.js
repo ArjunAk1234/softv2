@@ -228,6 +228,30 @@ router.get("/my", authorize("candidate"), async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
+// ── CANDIDATE: Get session by application ID (most direct lookup) ──────────────
+// GET /interview/by-app/:appId
+router.get("/by-app/:appId", authorize("candidate"), async (req, res, next) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT iss.*, s.scheduled_at, s.duration_minutes,
+               u.name as interviewer_name, j.title as job_title, c.company_name
+             FROM interview_sessions iss
+             JOIN interview_slots s ON s.id=iss.slot_id
+             JOIN interviewers i ON i.id=iss.interviewer_id
+             JOIN users u ON u.id=i.user_id
+             JOIN applications app ON app.id=iss.application_id
+             JOIN jobs j ON j.id=s.job_id
+             JOIN companies c ON c.id=j.company_id
+             WHERE iss.application_id=$1 AND app.candidate_id=$2`,
+            [req.params.appId, req.user.id]
+        );
+        if (!rows.length) return res.status(404).json({ error: "Session not found" });
+        res.json(rows[0]);
+    } catch (err) { next(err); }
+});
+
+
+
 // ── INTERVIEWER: Get my sessions ──────────────────────────────────────────────
 // GET /interview/interviewer/sessions
 router.get("/interviewer/sessions", authorize("interviewer"), async (req, res, next) => {

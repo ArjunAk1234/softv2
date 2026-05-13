@@ -304,15 +304,23 @@ router.get("/applications", async (req, res, next) => {
     try {
         const { rows } = await pool.query(
             `SELECT a.*, j.title AS job_title, j.location, j.job_type, c.company_name,
-               j.resume_results_published, j.test_results_published, j.results_published
+               j.resume_results_published, j.test_results_published, j.results_published,
+               iss.id AS interview_session_id, iss.status AS interview_session_status,
+               sl.scheduled_at, sl.duration_minutes,
+               u_iv.name AS interviewer_name
              FROM applications a
              JOIN jobs j ON j.id=a.job_id
              JOIN companies c ON c.id=j.company_id
+             LEFT JOIN interview_sessions iss ON iss.application_id=a.id
+             LEFT JOIN interview_slots sl ON sl.id=iss.slot_id
+             LEFT JOIN interviewers iv ON iv.id=iss.interviewer_id
+             LEFT JOIN users u_iv ON u_iv.id=iv.user_id
              WHERE a.candidate_id=$1 ORDER BY a.created_at DESC`, [req.user.id]
         );
         res.json(rows);
     } catch (err) { next(err); }
 });
+
 
 
 // GET /api/candidate/profile
